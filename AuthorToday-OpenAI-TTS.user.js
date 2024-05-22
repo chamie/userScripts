@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Author.Today OpenAI TTS
-// @namespace    https://github.com/chamie
-// @version      2024-05-15
+// @namespace    http://tampermonkey.net/
+// @version      2024-05-22
 // @description  Uses OpenAI's TTS to read the book.
-// @author       Chamie
+// @author       You
 // @match        https://author.today/reader/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=author.today
 // @grant        none
@@ -22,10 +22,9 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
 `
 */
 
-(function () {
-    const openAIToken = "INSERT-YOUR-API-KEY-HERE";
+// TODO: store settings using GM_setValue()/GM_getValue().
 
-    
+(function () {
     const loader = `
         <svg viewBox="0 0 10 5" xmlns="http://www.w3.org/2000/svg">
             <rect width="100%" height="10" style="fill: #dbf7ff; opacity: 0.7">
@@ -34,11 +33,15 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
         </svg>
     `.replaceAll(/\n/g, "");
 
+    const openAIToken = "INSERT-YOUR-API-KEY-HERE";
+
     const $ = selector => document.querySelector(selector);
     const $$ = selector => [...document.querySelectorAll(selector)];
 
     /** @type {"idle"|"playing"|"paused"} */
     let currentAction = "idle";
+
+    let playbackRate = 1.2;
 
     const audio = new Audio();
     audio.controls = true;
@@ -87,6 +90,13 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
         }
         .tts-controls-container.isLoading svg {
             display: block;
+        }
+        .tts-playback-rate-controls {
+            display: flex;
+            flex-direction: row;
+        }
+        .tts-playback-rate-controls span {
+            padding: 5px;
         }
     `;
     document.body.append(style);
@@ -144,6 +154,29 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
         return button;
     })
     controlsContainer.append(...buttons);
+
+    const speedControls = document.createElement("div");
+    speedControls.className = "tts-playback-rate-controls";
+    speedControls.title = `Narration speed: ${playbackRate}`;
+
+    const speedSlider = document.createElement("input");
+    speedSlider.type = "range";
+    speedSlider.min = 0.25;
+    speedSlider.max = 4;
+    speedSlider.step = .1;
+    speedSlider.value = playbackRate;
+    const speedValue = document.createElement("span");
+    speedSlider.oninput = () => {
+        playbackRate = speedSlider.value;
+        audio.playbackRate = playbackRate;
+        speedControls.title = `Narration speed: ${playbackRate}`;;
+        speedValue.innerHTML = playbackRate;
+    }
+
+    speedControls.append(speedSlider, speedValue);
+
+    controlsContainer.append(speedControls);
+
     $("nav").append(controlsContainer);
 
     let loadingCounter = 0;
@@ -185,7 +218,7 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
     const playAudio = (data) => {
         const blob = new Blob([data], { type: "audio/mpeg" });
         audio.src = URL.createObjectURL(blob);
-        audio.playbackRate = 1.2;
+        audio.playbackRate = playbackRate;
         audio.play();
 
         //We may show the player:
