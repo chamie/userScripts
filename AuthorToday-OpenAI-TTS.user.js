@@ -25,6 +25,10 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
 // TODO: store settings using GM_setValue()/GM_getValue().
 
 (function () {
+    // Settings:
+    const openAIToken = "INSERT-YOUR-API-KEY-HERE";
+
+
     const loader = `
         <svg viewBox="0 0 10 5" xmlns="http://www.w3.org/2000/svg">
             <rect width="100%" height="10" style="fill: #dbf7ff; opacity: 0.7">
@@ -32,8 +36,6 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
             </rect>
         </svg>
     `.replaceAll(/\n/g, "");
-
-    const openAIToken = "INSERT-YOUR-API-KEY-HERE";
 
     const $ = selector => document.querySelector(selector);
     const $$ = selector => [...document.querySelectorAll(selector)];
@@ -123,6 +125,10 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
 
     const actions = {
         play: () => {
+            if (currentAction === "playing") {
+                return;
+            }
+
             if (currentAction === "paused") {
                 audio.play();
             } else {
@@ -184,31 +190,39 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
     /**
      * Converts text into speech audio using the OpenAI TTS API
      * @param {string} text Text to convert into audio
-     * @returns ArrayBuffer with the content of mp3 audio file
+     * @returns {Promise<ArrayBuffer>} ArrayBuffer with the content of mp3 audio file
      */
     const fetchAudio = async (text) => {
         setLoading(true);
         loadingCounter++;
-        const response = await fetch("https://api.openai.com/v1/audio/speech", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${openAIToken}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: "tts-1",
-                input: text,
-                voice: "onyx",
-            })
-        });
 
-        loadingCounter--;
+        try {
+            const response = await fetch("https://api.openai.com/v1/audio/speech", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${openAIToken}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    model: "tts-1",
+                    input: text,
+                    voice: "onyx",
+                })
+            });
 
-        if (!loadingCounter) {
-            setLoading(false);
+            loadingCounter--;
+
+            if (!loadingCounter) {
+                setLoading(false);
+            }
+
+            return response.arrayBuffer();
         }
-
-        return response.arrayBuffer();
+        catch (e) {
+            loadingCounter--;
+            console.error(e);
+            return null;
+        }
     }
 
     /**
