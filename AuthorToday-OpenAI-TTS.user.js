@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Author.Today OpenAI TTS
 // @namespace    http://tampermonkey.net/
-// @version      2024-05-22
+// @version      2024-07-19
 // @description  Uses OpenAI's TTS to read the book.
 // @author       You
 // @match        https://author.today/reader/*
