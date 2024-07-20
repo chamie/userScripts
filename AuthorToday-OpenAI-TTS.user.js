@@ -2,8 +2,9 @@
 // @name         Author.Today OpenAI TTS
 // @namespace    http://tampermonkey.net/
 // @version      2024-07-20
-// @description  Uses OpenAI's TTS to read the book.
-// @author       You
+// @description  Uses OpenAI's TTS to read the books in on-site reader.
+// @homepageURL  https://github.com/chamie/userScripts/blob/main/AuthorToday-OpenAI-TTS.user.js
+// @author       Chamie
 // @match        https://author.today/reader/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=author.today
 // @grant        none
