@@ -272,11 +272,11 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
 
         const topUpAudioBuffer = () => {
             while (currentParagraphIdx < paragraphs.length - 1 && getBufferedAudioLengthInCharacters() < 4000) {
-                const paragraph = paragraphs.slice(currentParagraphIdx).find(x=>!x.audio);
-                if(!paragraph) {
+                const paragraph = paragraphs.slice(currentParagraphIdx).find(x => !x.audio);
+                if (!paragraph) {
                     break;
                 }
-                paragraph.audio = fetchAudio(p.text);
+                paragraph.audio = fetchAudio(paragraph.text);
             }
         }
 
@@ -284,7 +284,7 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
             $$("p.beingNarrated").forEach(p => p.classList.remove("beingNarrated"));
 
             const paragraph = paragraphs[currentParagraphIdx];
-            
+
             if (!paragraph) {
                 actions.stop();
                 return;
@@ -292,7 +292,7 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
 
             topUpAudioBuffer();
 
-            paragraph.classList.add("beingNarrated");
+            paragraph.element.classList.add("beingNarrated");
 
             const audio = await paragraph.audio;
 
@@ -306,7 +306,7 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
             // This comes too high:
             //paragraph.scrollIntoView();
 
-            $("#reader").scrollTop = paragraph.offsetTop;
+            $("#reader").scrollTop = paragraph.element.offsetTop;
 
             currentParagraphIdx++;
         }
