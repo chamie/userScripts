@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Author.Today OpenAI TTS
 // @namespace    http://tampermonkey.net/
-// @version      2024-07-19
+// @version      2024-07-20
 // @description  Uses OpenAI's TTS to read the book.
 // @author       You
 // @match        https://author.today/reader/*
@@ -22,12 +22,22 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
 `
 */
 
+/**
+ * @typedef {Object} Paragraph
+ * @property {HTMLParagraphElement} element
+ * @property {Promise<ArrayBuffer>} audio
+ * @property {string} text
+ */
+
 // TODO: store settings using GM_setValue()/GM_getValue().
+// TODO: add UI for setting the OpenAI token.
 
 (function () {
     // Settings:
     const openAIToken = "INSERT-YOUR-API-KEY-HERE";
 
+    /** @type {Paragraph[]} */
+    let paragraphs = [];
 
     const loader = `
         <svg viewBox="0 0 10 5" xmlns="http://www.w3.org/2000/svg">
@@ -212,6 +222,8 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
 
             loadingCounter--;
 
+            console.debug({ loadingCounter });
+
             if (!loadingCounter) {
                 setLoading(false);
             }
@@ -240,68 +252,69 @@ border-image: repeating-linear-gradient(45deg, white,white, black, black, white 
     }
 
     const startReading = async () => {
+        paragraphs = paragraphs.length
+            ? paragraphs
+            : $$("#text-container p").map(p => ({
+                element: p,
+                text: p.innerText,
+            }));
 
         const readerScrollTop = $("#reader").scrollTop;
-        /** @type {HTMLParagraphElement[]} */
-        const paragraphs = $$("#text-container p");
-        const paragraphTexts = paragraphs.map(p => p.innerText);
 
-        const firstVisibleParagraphIdx = paragraphs.findIndex(x => x.style.border = x.offsetTop - readerScrollTop > 0);
-
-        /** @type {number[]} */
-        const paragraphsStash = [];
-
-        /** @type {Map<number, Promise<ArrayBuffer>>} */
-        const paragraphAudio = new Map();
-
-        const getStashLength = () =>
-            paragraphsStash.reduce((acc, pIdx) => acc += paragraphTexts[pIdx].length, 0);
+        const firstVisibleParagraphIdx = paragraphs.findIndex(paragraph => paragraph.element.offsetTop - readerScrollTop > 0);
 
         let currentParagraphIdx = firstVisibleParagraphIdx;
 
-        const topUpStash = () => {
-            while (currentParagraphIdx < paragraphs.length && getStashLength() + paragraphTexts[currentParagraphIdx].length < 4000) {
-                paragraphsStash.push(currentParagraphIdx);
-                const text = paragraphTexts[currentParagraphIdx];
-                if (!paragraphAudio.has(currentParagraphIdx)) {
-                    paragraphAudio.set(currentParagraphIdx, fetchAudio(text));
+        const getBufferedAudioLengthInCharacters = () =>
+            paragraphs.slice(currentParagraphIdx)
+                .filter(x => x.audio)
+                .reduce((acc, p) => acc += p.text.length, 0);
+
+        const topUpAudioBuffer = () => {
+            while (currentParagraphIdx < paragraphs.length - 1 && getBufferedAudioLengthInCharacters() < 4000) {
+                const paragraph = paragraphs.slice(currentParagraphIdx).find(x=>!x.audio);
+                if(!paragraph) {
+                    break;
                 }
-                currentParagraphIdx++;
+                paragraph.audio = fetchAudio(p.text);
             }
         }
 
         const playNext = async () => {
             $$("p.beingNarrated").forEach(p => p.classList.remove("beingNarrated"));
 
-            const idx = paragraphsStash.shift();
-            if (idx === undefined) {
+            const paragraph = paragraphs[currentParagraphIdx];
+            
+            if (!paragraph) {
                 actions.stop();
                 return;
             }
 
-            topUpStash();
+            topUpAudioBuffer();
 
-            const paragraph = paragraphs[idx];
-            const audio = await paragraphAudio.get(idx);
+            paragraph.classList.add("beingNarrated");
+
+            const audio = await paragraph.audio;
 
             if (audio === undefined) {
-                console.error(`No audio request sent for paragraph ${idx}`, paragraph);
+                console.error(`No audio request sent for paragraph`, paragraph);
                 return;
             }
 
             playAudio(audio);
 
-            paragraph.classList.add("beingNarrated");
-
             // This comes too high:
             //paragraph.scrollIntoView();
 
             $("#reader").scrollTop = paragraph.offsetTop;
+
+            currentParagraphIdx++;
         }
 
         audio.addEventListener("ended", playNext);
 
-        topUpStash();
+        topUpAudioBuffer();
+
         playNext();
     }
 
