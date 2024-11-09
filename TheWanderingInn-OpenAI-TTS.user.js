@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         TWI OpenAI TTS
 // @namespace    http://tampermonkey.net/
-// @version      2024-10-11
+// @version      2024-11-06
 // @description  Uses OpenAI's TTS to read the book.
 // @author       You
 // @match        https://wanderinginn.com/*
+// @match        https://author.today/reader/*
 // @icon         https://i0.wp.com/wanderinginn.com/wp-content/uploads/2016/11/erin.png
 // @grant        GM.getValue
 // @grant        GM.setValue
@@ -12,7 +13,7 @@
 
 /**
  * @typedef {Object} Paragraph
- * @property {HTMLParagraphElement} element
+ * @property {HTMLParagraphElement[]} elements
  * @property {Promise<ArrayBuffer>} audio
  * @property {string} text
  */
@@ -21,6 +22,187 @@ const PARAGRAPHS_SELECTOR = ".entry-content p";
 let NARRATION_VOICE = await GM.getValue("voice", "nova");
 let NARRATION_SPEED = parseFloat(await GM.getValue("speed", 1.2));
 let OPENAI_TOKEN = await GM.getValue("OpenAI token", null);
+let GOOGLE_CLOUD_TOKEN = await GM.getValue("GoogleCloud token", null);
+let USE_GOOGLE = await GM.getValue("use Google", false);
+
+const siteIdentities = {
+    twi: {
+        controlsParentSelector: "body",
+        paragraphsSelector: ".entry-content p",
+        controlsContainerClass: "fixed"
+    },
+    authorToday: {
+        controlsParentSelector: "nav",
+        paragraphsSelector: "#text-container p",
+        controlsContainerClass: "fixed"
+    },
+}
+
+/**
+ * @type {keyof siteIdentities}
+ */
+const site = "twi";
+
+const siteDefs = siteIdentities[site];
+
+const GoogleVoices = [
+    {
+        "name": "en-US-Casual-K",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Journey-D",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Journey-F",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Journey-O",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Neural2-A",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Neural2-C",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Neural2-D",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Neural2-E",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Neural2-F",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Neural2-G",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Neural2-H",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Neural2-I",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Neural2-J",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-News-K",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-News-L",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-News-N",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Polyglot-1",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Standard-A",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Standard-B",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Standard-C",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Standard-D",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Standard-E",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Standard-F",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Standard-G",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Standard-H",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Standard-I",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Standard-J",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Studio-O",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Studio-Q",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Wavenet-A",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Wavenet-B",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Wavenet-C",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Wavenet-D",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Wavenet-E",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Wavenet-F",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Wavenet-G",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Wavenet-H",
+        "gender": "FEMALE",
+    },
+    {
+        "name": "en-US-Wavenet-I",
+        "gender": "MALE",
+    },
+    {
+        "name": "en-US-Wavenet-J",
+        "gender": "MALE",
+    }
+];
 
 const isElementInViewport = (el) => {
     var rect = el.getBoundingClientRect();
@@ -34,26 +216,24 @@ const isElementInViewport = (el) => {
 }
 
 const addStyles = () => {
-
     // Adding component CSS styles
     const style = document.createElement("style");
     style.innerHTML = `
-        p.beingNarrated {
-            box-shadow: 0 0 10px black, inset 0 0 30px 10px rgba(255,255,255,0.3);
-            border-radius: 5px;
-            padding: 5px;
+        .tts-controls-container.fixed {
+            position: fixed;
+            margin: 0;
+            background: rgba(.8,.8,.8,.3);
         }
         .tts-controls-container {
-            position: fixed;
+            float: left;
             height: 32px;
-            margin: 0;
+            margin: 0 20px;
             padding: 0;
             border: none;
             display: flex;
             flex-direction: row;
             align-items: center;
             justify-content: space-around;
-            background: rgba(.8,.8,.8,.3);
         }
         .tts-controls-container button {
             display: none;
@@ -79,6 +259,7 @@ const addStyles = () => {
             box-shadow: 0 0 10px black, inset 0 0 30px 10px rgba(255,255,255,0.3);
             border-radius: 5px;
             padding: 5px;
+            background: rgba(0,0,0,.65);
         }
 
         .tts-audio-player {
@@ -102,6 +283,45 @@ const addStyles = () => {
         .tts-playback-rate-controls span {
             padding: 5px;
         }
+        .tts-narrated-part-highlighter {
+            position: absolute;
+            visibility: hidden;
+            width: 4px;
+            box-shadow: 0 0 5px black;
+        }
+        .tts-narrated-part-highlighter--progress {
+            background: salmon;
+            height: 0%;
+        }
+        .tts-controls-container input.option-switch {
+            display: none;
+        }
+        .tts-controls-container input:checked+.options-container .for-checked,
+        .tts-controls-container input:not(:checked)+.options-container .for-unchecked {
+            display: initial;
+        }
+
+        .tts-controls-container input:not(:checked)+.options-container .for-checked,
+        .tts-controls-container input:checked+.options-container .for-unchecked {
+            display: none;
+        }
+        .tts-controls-container .options-container {
+            display: flex;
+            flex-direction: column;
+        }
+        .tts-controls-container .options-container label {
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        .tts-controls-container .options-container .token-input {
+            color: lightgray;
+            transition: all .5s;
+            background: lightgray;
+        }
+        .tts-controls-container .options-container .token-input:hover {
+            color: black;
+            background: white;
+        }
     `;
     document.body.append(style);
 }
@@ -116,7 +336,7 @@ const loader = `
 
 const createControlsContainer = () => {
     const controlsContainer = document.createElement("div");
-    controlsContainer.className = "tts-controls-container";
+    controlsContainer.className = "tts-controls-container " + siteDefs.controlsContainerClass;
     controlsContainer.innerHTML = loader;
     controlsContainer.title = "Text-to-Speech controls, you can also start narration by pressing Shift+R on the keyboard";
     return controlsContainer;
@@ -124,19 +344,38 @@ const createControlsContainer = () => {
 
 const createSettingsButton = () => {
     const settingsButton = document.createElement("span");
-    const voices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"];
+    const openAIVoices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"];
     settingsButton.innerHTML = `
-    <label class="menu-button"><input type="checkbox" ${OPENAI_TOKEN ? "" : "checked"} /><span>⚙</span>
-    <span>Narration voice:
-        <select>
-            ${voices.map(v => `<option ${v === NARRATION_VOICE ? "selected" : ""} value="${v}">${v}</option>`).join("")}
-        </select><br>
-        OpenAI access token:
-        <input placeholder="Input your OpenAI access token here" name="token">
+    <label class="menu-button"><input type="checkbox" /><span>⚙</span>
+    <span>
+        <input ${USE_GOOGLE ? "checked" : ""} type="checkbox" class="option-switch" id="tts-engine-switch" name="use-google" />
+        <div class="options-container">
+        Engine: 
+        <label class="for-unchecked" title="Click to change" for="tts-engine-switch">OpenAI</label>
+        <label class="for-checked" title="Click to change" for="tts-engine-switch">GoogleCloud</label>
+        <div class="for-unchecked">
+            Narration voice:
+            <select name="open-ai-voice">
+                ${openAIVoices.map(v => `<option ${v === NARRATION_VOICE ? "selected" : ""} value="${v}">${v}</option>`).join("")}
+            </select><br>
+            OpenAI access token:
+            <input placeholder="Input your OpenAI access token here" name="token" />
+        </div>
+        <div class="for-checked">
+            Narration voice:
+            <select name="google-cloud-voice">
+                ${GoogleVoices.map(v => `<option ${v.name === NARRATION_VOICE ? "selected" : ""} value="${v.name}">${v.name} (${v.gender})</option>`).join("")}
+            </select><br>
+            GCloud access token:
+            <input class="token-input" placeholder="Input your GoogleCloud access token here" name="gcloud-token" />
+        </div>
+        </div>
     </span>
     </label>`;
-    //$(".show-settings-btn").style = `position: fixed; top: 0; right: 0;`;
-    const voiceSelect = settingsButton.getElementsByTagName("select")[0];
+    /** @type {HTMLInputElement} */
+    const useGoogleCheckbox = settingsButton.querySelector("input[name=use-google]");
+    useGoogleCheckbox.onchange = () => { USE_GOOGLE = useGoogleCheckbox.checked; GM.setValue("use Google", USE_GOOGLE); }
+    const voiceSelect = settingsButton.querySelector("select[name=open-ai-voice]");
     voiceSelect.onchange = () => { NARRATION_VOICE = voiceSelect.value; GM.setValue("voice", NARRATION_VOICE); };
     const tokenInput = settingsButton.querySelector("input[name=token]");
     tokenInput.value = OPENAI_TOKEN || "";
@@ -144,6 +383,13 @@ const createSettingsButton = () => {
         OPENAI_TOKEN = tokenInput.value;
         GM.setValue("OpenAI token", OPENAI_TOKEN);
     }
+    const googleTokenInput = settingsButton.querySelector("input[name=gcloud-token]");
+    googleTokenInput.value = GOOGLE_CLOUD_TOKEN || "";
+    googleTokenInput.onchange = () => {
+        GOOGLE_CLOUD_TOKEN = googleTokenInput.value;
+        GM.setValue("GoogleCloud token", GOOGLE_CLOUD_TOKEN);
+    }
+
     return settingsButton;
 }
 
@@ -180,11 +426,42 @@ const createSpeedControls = (audio) => {
     return speedControls;
 }
 
+const createNarrationHighlighter = () => {
+    const element = document.createElement("div");
+    element.className = "tts-narrated-part-highlighter";
+    element.innerHTML = `<div class="tts-narrated-part-highlighter--progress"></div>`;
+    const progressBar = element.querySelector('.tts-narrated-part-highlighter--progress');
+
+    return {
+        element,
+        /** @param {number} percentage percentage to set the progress to */
+        setPercentage: (percentage) => { progressBar.style.height = `${percentage * 100}%`; },
+        /** Place the highlighter to the left of a column of elements and stretch it to their combined height
+         * @param {HTMLElement[]} elements Elements to abut (place next to and stretch) */
+        abut: (elements) => {
+            const top = elements[0].offsetTop;
+            const lastElement = elements.at(-1);
+            const bottom = lastElement.offsetTop + lastElement.offsetHeight;
+            const height = bottom - top;
+            const left = lastElement.offsetLeft - 15;
+
+            element.style.top = `${top}px`;
+            element.style.height = `${height}px`;
+            element.style.left = `${left}px`;
+            element.style.visibility = "visible";
+        },
+        hide: () => {
+            element.style.visibility = "hidden";
+        }
+    };
+}
+
 const extractElementText = (element) => {
     const clone = element.cloneNode(true);
-    [...clone.getElementsByTagName("em")].forEach(x => x.outerHTML = `*${x.innerText.trim()}*`);
+    [...clone.getElementsByTagName("em")].forEach(x => x.outerHTML = USE_GOOGLE ? `'${x.innerText.trim()}'` : `*${x.innerText.trim()}*`);
     [...clone.children].forEach(x => x.outerHTML = x.innerText);
-    return clone.innerText.replace(/\[(.*?)\]/g, "_$1_");
+    let result = clone.innerText.trim();
+    return USE_GOOGLE ? result : result.replace(/\[(.*?)\]/g, "_$1_");
 }
 
 (function () {
@@ -200,7 +477,15 @@ const extractElementText = (element) => {
     const audio = new Audio();
     audio.controls = true;
     audio.className = "tts-audio-player";
-    $("#nav-left").append(audio);
+    audio.addEventListener("timeupdate", () => {
+        highlighter.setPercentage(audio.currentTime / audio.duration)
+    });
+    $(siteDefs.controlsParentSelector).append(audio);
+
+    // Add highlighter
+    const highlighter = createNarrationHighlighter();
+    $(siteDefs.paragraphsSelector).parentElement.parentElement.append(highlighter.element);
+
 
     // Adding controls
     const controlsContainer = createControlsContainer();
@@ -235,7 +520,7 @@ const extractElementText = (element) => {
         stop: () => {
             setCurrentAction("idle");
             audio.src = undefined;
-            $$("p.beingNarrated").forEach(p => p.classList.remove("beingNarrated"));
+            highlighter.hide();
         },
         pause: () => {
             setCurrentAction("paused");
@@ -255,7 +540,7 @@ const extractElementText = (element) => {
 
     controlsContainer.append(createSpeedControls(audio));
 
-    $("body").append(controlsContainer);
+    $(siteDefs.controlsParentSelector).append(controlsContainer);
 
     let loadingCounter = 0;
 
@@ -297,13 +582,43 @@ const extractElementText = (element) => {
         }
     }
 
+    const toSpeechGoogle = async (text) => {
+        const body = {
+            input: {
+                text
+            },
+            voice: {
+                languageCode: "en-US",
+                name: "en-US-Journey-D",
+            },
+            audioConfig: {
+                audioEncoding: "OGG_OPUS"
+            }
+        }
+        const request = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${GOOGLE_CLOUD_TOKEN}`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(body),
+        });
+
+        const response = await request.json();
+
+        return response.audioContent;
+    }
+
     /**
      * Plays the audio data.
-     * @param audioData {Response} Response data of the audio file.
+     * @param audioData {Response | string} Response data (if isBlob) or base64 of the file
      */
-    const playAudio = (audioData) => {
+    const playAudio = (audioData, isBlob) => {
+        if(isBlob) {
         const blob = new Blob([audioData], { type: "audio/mpeg" });
         audio.src = URL.createObjectURL(blob);
+        } else {
+            audio.src = `data:audio/ogg;base64,${audioData}`;
+        }
         audio.playbackRate = NARRATION_SPEED;
         audio.play();
 
@@ -315,47 +630,59 @@ const extractElementText = (element) => {
         // aggregate the paragraphs text into the array
         paragraphs = paragraphs.length
             ? paragraphs
-            : $$(PARAGRAPHS_SELECTOR).map(p => ({
-                element: p,
+            : $$(siteDefs.paragraphsSelector).map(p => ({
+                firstElement: p,
                 text: extractElementText(p),
-            })).filter(x => x.text.trim());
+            })).filter(x => x.text).map(x => ({ ...x, elements: [x.firstElement] }));
 
-        // join short (under 100 chars) paragraphs with prev one, if that is not over 1000 chars
+        // join short (under 200 chars) paragraphs with prev one, if that one is less than 1000
+        let skippedCounter = 0;
         paragraphs.forEach((paragraph, idx) => {
             if (idx < 1) {
                 return;
             }
-            const prevParagraph = paragraphs[idx - 1];
-            if (paragraph.text.length < 100 && idx > 0 && prevParagraph.text.length < 1000) {
-                prevParagraph.text += paragraph.text;
+            const prevParagraph = paragraphs[idx - 1 - skippedCounter];
+            if (prevParagraph && paragraph.text.length < 200 && idx > 0 && prevParagraph.text.length < 1000) {
+                skippedCounter++;
+                prevParagraph.text += "\n" + paragraph.text;
+                prevParagraph.elements.push(paragraph.firstElement);
                 paragraph.text = null;
+            } else {
+                skippedCounter = 0;
             }
         });
 
-        paragraphs = paragraphs.filter(paragraph => paragraph.text);
+        paragraphs = paragraphs.filter(p => p.text);
 
-        const firstVisibleParagraphIdx = paragraphs.findIndex(paragraph => isElementInViewport(paragraph.element));
+
+        const firstVisibleParagraphIdx = paragraphs.findIndex(paragraph => isElementInViewport(paragraph.firstElement));
 
         let currentParagraphIdx = firstVisibleParagraphIdx;
 
-        const getBufferedAudioLengthInCharacters = () =>
+        // const getBufferedAudioLengthInCharacters = () =>
+        //     paragraphs.slice(currentParagraphIdx)
+        //         .filter(x => x.audio)
+        //         .reduce((acc, p) => acc += p.text.length, 0);
+
+        const getBufferedAudioLengthInParagraphs = () =>
             paragraphs.slice(currentParagraphIdx)
-                .filter(x => x.audio)
-                .reduce((acc, p) => acc += p.text.length, 0);
+                .filter(x => x.audio || x.googleAudio).length;
 
         const topUpAudioBuffer = () => {
-            while (currentParagraphIdx < paragraphs.length - 1 && getBufferedAudioLengthInCharacters() < 2000) {
-                const paragraph = paragraphs.slice(currentParagraphIdx).find(x => !x.audio);
+            while (currentParagraphIdx < paragraphs.length - 1 && getBufferedAudioLengthInParagraphs() < 3) {
+                const paragraph = paragraphs.slice(currentParagraphIdx).find(x => !x.audio && !x.googleAudio);
                 if (!paragraph) {
                     break;
                 }
-                paragraph.audio = toSpeech(paragraph.text);
+                if (USE_GOOGLE) {
+                    paragraph.googleAudio = toSpeechGoogle(paragraph.text);
+                } else {
+                    paragraph.audio = toSpeech(paragraph.text);
+                }
             }
         }
 
         const playNext = async () => {
-            $$("p.beingNarrated").forEach(p => p.classList.remove("beingNarrated"));
-
             const paragraph = paragraphs[currentParagraphIdx];
 
             if (!paragraph) {
@@ -365,18 +692,23 @@ const extractElementText = (element) => {
 
             topUpAudioBuffer();
 
-            paragraph.element.classList.add("beingNarrated");
+            highlighter.abut(paragraph.elements);
+            highlighter.setPercentage(0);
 
-            const audio = await paragraph.audio;
+            const isBlob = !!paragraph.audio;
+
+            const audio = isBlob
+                ? await paragraph.audio
+                : await paragraph.googleAudio;
 
             if (audio === undefined) {
                 console.error(`No audio request sent for paragraph`, paragraph);
                 return;
             }
+            
+            playAudio(audio, isBlob);
 
-            playAudio(audio);
-
-            paragraph.element.scrollIntoView();
+            paragraph.firstElement.scrollIntoView();
 
             document.scrollingElement.scrollTop = document.scrollingElement.scrollTop - 100;
 
